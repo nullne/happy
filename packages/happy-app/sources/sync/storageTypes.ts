@@ -96,6 +96,9 @@ export interface Session {
     draft?: string | null; // Local draft message, not synced to server
     permissionMode?: string | null; // Local permission mode key, not synced to server
     modelMode?: string | null; // Local model key, not synced to server
+    projectId?: string | null; // Bound project ID, not synced to server
+    gitBranch?: string | null; // Git branch created for this session
+    githubUrl?: string | null; // GitHub repo URL from project
     // IMPORTANT: latestUsage is extracted from reducerState.latestUsage after message processing.
     // We store it directly on Session to ensure it's available immediately on load.
     // Do NOT store reducerState itself on Session - it's mutable and should only exist in SessionMessages.

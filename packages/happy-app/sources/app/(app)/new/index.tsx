@@ -43,6 +43,10 @@ import { useNavigateToSession } from '@/hooks/useNavigateToSession';
 import { useNewSessionDraft } from '@/hooks/useNewSessionDraft';
 import { Modal } from '@/modal';
 import type { Machine, Session } from '@/sync/storageTypes';
+import { useAuth } from '@/auth/AuthContext';
+import { fetchProjects, ProjectConfig } from '@/sync/apiProjects';
+import { fetchMachinesRest, MachineHostInfo } from '@/sync/apiMachinesRest';
+import { setupProjectSession } from '@/utils/gitProject';
 import {
     getHardcodedPermissionModes,
     getHardcodedModelModes,
@@ -74,7 +78,7 @@ const ALL_AGENTS: { key: AgentKey; label: string }[] = [
 
 type PickerItem = { key: string; label: string; subtitle?: string; dimmed?: boolean };
 
-type PickerType = 'machine' | 'path' | 'worktree';
+type PickerType = 'machine' | 'path' | 'worktree' | 'project';
 
 type PermissionStyle = { color: string; icon: 'play-forward' | 'pause' };
 
@@ -494,6 +498,27 @@ function NewSessionScreen() {
         draft.setSessionType(worktreeKey !== '__none__' ? 'worktree' : 'simple');
     }, [worktreeKey]);
 
+    // Project state
+    const { credentials } = useAuth();
+    const [projects, setProjects] = React.useState<ProjectConfig[]>([]);
+    const [selectedProjectId, setSelectedProjectId] = React.useState<string | null>(null);
+    const [machineHostInfo, setMachineHostInfo] = React.useState<Record<string, MachineHostInfo | null>>({});
+
+    React.useEffect(() => {
+        if (!credentials) return;
+        fetchProjects(credentials).then(setProjects).catch(() => {});
+        fetchMachinesRest(credentials).then(machines => {
+            const info: Record<string, MachineHostInfo | null> = {};
+            for (const m of machines) {
+                info[m.id] = m.hostInfo;
+            }
+            setMachineHostInfo(info);
+        }).catch(() => {});
+    }, [credentials]);
+
+    const selectedProject = projects.find(p => p.id === selectedProjectId) ?? null;
+    const currentHostInfo = selectedMachineId ? machineHostInfo[selectedMachineId] ?? null : null;
+
     // Local-only UI state (not persisted)
     const [permissionIndex, setPermissionIndex] = React.useState(0);
     const [modelIndex, setModelIndex] = React.useState(0);
@@ -754,21 +779,38 @@ function NewSessionScreen() {
     }, [flashOpacity]);
 
     // Picker data derived from active picker type
+    const projectItems = React.useMemo<PickerItem[]>(() => {
+        const items: PickerItem[] = [{ key: '__none__', label: 'No project' }];
+        for (const p of projects) {
+            items.push({
+                key: p.id,
+                label: p.name,
+                subtitle: p.githubUrl?.replace(/^https?:\/\/(www\.)?github\.com\//, '') ?? undefined,
+            });
+        }
+        return items;
+    }, [projects]);
+
     const pickerData = React.useMemo(() => {
         switch (activePicker) {
             case 'machine':
                 return { title: 'Machine', items: machineItems, selectedKey: selectedMachineId, searchPlaceholder: 'search machines...' };
             case 'worktree':
                 return { title: 'Worktree', fixedItems: WORKTREE_FIXED_ITEMS, items: worktreeItems, selectedKey: worktreeKey, searchPlaceholder: 'search worktrees...' };
+            case 'project':
+                return { title: 'Project', items: projectItems, selectedKey: selectedProjectId ?? '__none__', searchPlaceholder: 'search projects...' };
             default:
                 return null;
         }
-    }, [activePicker, machineItems, selectedMachineId, worktreeKey, worktreeItems]);
+    }, [activePicker, machineItems, selectedMachineId, worktreeKey, worktreeItems, projectItems, selectedProjectId]);
 
     const handlePickerSelect = React.useCallback((key: string) => {
         switch (activePicker) {
             case 'machine':
                 setSelectedMachineId(key);
+                break;
+            case 'project':
+                setSelectedProjectId(key === '__none__' ? null : key);
                 break;
             case 'worktree':
                 setWorktreeKey(key);
@@ -790,21 +832,47 @@ function NewSessionScreen() {
 
         setIsSpawning(true);
         try {
-            const pathToUse = trimPathInput(selectedPath) || '~';
-            const absolutePath = resolveAbsolutePath(pathToUse, selectedMachine.metadata?.homeDir);
+            let spawnDirectory: string;
+            let gitBranch = '';
 
-            // Handle worktree selection
-            let spawnDirectory = absolutePath;
-            if (worktreeKey === '__new__') {
-                const worktreeResult = await createWorktree(selectedMachineId, absolutePath);
-                if (!worktreeResult.success) {
-                    Modal.alert(t('common.error'), worktreeResult.error || 'Failed to create worktree');
+            if (selectedProject) {
+                // Project-bound session: auto-resolve directory and setup git
+                const workspaceRoot = currentHostInfo?.workspaceRoot;
+                if (!workspaceRoot) {
+                    Modal.alert(t('common.error'), 'Machine has no workspace root configured. Update machine hostInfo with workspaceRoot.');
                     return;
                 }
-                spawnDirectory = worktreeResult.worktreePath;
-            } else if (worktreeKey !== '__none__') {
-                // Existing worktree — use its path directly
-                spawnDirectory = worktreeKey;
+                if (selectedProject.githubUrl) {
+                    const gitResult = await setupProjectSession(
+                        selectedMachineId, workspaceRoot, selectedProject, prompt.trim() || 'session'
+                    );
+                    if (!gitResult.success) {
+                        Modal.alert(t('common.error'), gitResult.error || 'Failed to setup project');
+                        return;
+                    }
+                    spawnDirectory = gitResult.directory;
+                    gitBranch = gitResult.branch;
+                } else {
+                    const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60);
+                    spawnDirectory = `${workspaceRoot}/${slugify(selectedProject.name)}`;
+                }
+                approvedNewDirectoryCreation = true;
+            } else {
+                // Free-form path (existing behavior)
+                const pathToUse = trimPathInput(selectedPath) || '~';
+                const absolutePath = resolveAbsolutePath(pathToUse, selectedMachine.metadata?.homeDir);
+
+                spawnDirectory = absolutePath;
+                if (worktreeKey === '__new__') {
+                    const worktreeResult = await createWorktree(selectedMachineId, absolutePath);
+                    if (!worktreeResult.success) {
+                        Modal.alert(t('common.error'), worktreeResult.error || 'Failed to create worktree');
+                        return;
+                    }
+                    spawnDirectory = worktreeResult.worktreePath;
+                } else if (worktreeKey !== '__none__') {
+                    spawnDirectory = worktreeKey;
+                }
             }
 
             // Persist last used settings
@@ -828,6 +896,15 @@ function NewSessionScreen() {
                     // Set permission mode and model on the session before sending
                     storage.getState().updateSessionPermissionMode(result.sessionId, currentPermission.key);
                     storage.getState().updateSessionModelMode(result.sessionId, currentModelKey);
+
+                    // Store project metadata on the session
+                    if (selectedProject) {
+                        storage.getState().updateSessionProjectInfo(result.sessionId, {
+                            projectId: selectedProject.id,
+                            gitBranch: gitBranch || undefined,
+                            githubUrl: selectedProject.githubUrl || undefined,
+                        });
+                    }
 
                     // Clear input text so draft doesn't repeat the sent message
                     setPrompt('');
@@ -863,7 +940,7 @@ function NewSessionScreen() {
         } finally {
             setIsSpawning(false);
         }
-    }, [selectedMachineId, selectedMachine, selectedPath, selectedAgent, prompt, router, navigateToSession, currentPermission.key, currentModelKey, worktreeKey]);
+    }, [selectedMachineId, selectedMachine, selectedPath, selectedAgent, prompt, router, navigateToSession, currentPermission.key, currentModelKey, worktreeKey, selectedProject, currentHostInfo]);
 
     const canSend = selectedMachineId && selectedMachine && isMachineOnline(selectedMachine) && !isSpawning;
 
@@ -900,6 +977,24 @@ function NewSessionScreen() {
                     <View style={styles.configBox}>
                         {isConfigExpanded ? (
                             <>
+                                {/* Project row */}
+                                {projects.length > 0 && (
+                                    <Pressable
+                                        style={(p) => [styles.configRow, p.pressed && styles.configRowPressed]}
+                                        onPress={() => togglePicker('project')}
+                                    >
+                                        <Octicons name="project" size={15} color={theme.colors.textSecondary} />
+                                        <Text style={styles.configLabel} numberOfLines={1}>
+                                            {selectedProject ? selectedProject.name : 'No project'}
+                                        </Text>
+                                        {selectedProject?.githubUrl && (
+                                            <Text style={[styles.configLabel, { color: theme.colors.textSecondary, fontSize: 11 }]} numberOfLines={1}>
+                                                {selectedProject.githubUrl.replace(/^https?:\/\/(www\.)?github\.com\//, '')}
+                                            </Text>
+                                        )}
+                                    </Pressable>
+                                )}
+
                                 {/* Machine row */}
                                 <View style={styles.configRowWithToggle}>
                                     <Pressable
@@ -938,16 +1033,18 @@ function NewSessionScreen() {
 
                                 {/* Config rows below machine — grayed out when offline */}
                                 <View style={{ opacity: isOffline ? 0.4 : 1 }} pointerEvents={isOffline ? 'none' : 'auto'}>
-                                    {/* Path row */}
-                                    <Pressable
-                                        style={(p) => [styles.configRow, p.pressed && styles.configRowPressed]}
-                                        onPress={() => togglePicker('path')}
-                                    >
-                                        <Ionicons name="folder-outline" size={15} color={theme.colors.textSecondary} />
-                                        <Text style={styles.configLabel} numberOfLines={1}>
-                                            {pathName}
-                                        </Text>
-                                    </Pressable>
+                                    {/* Path row — hidden when project is selected */}
+                                    {!selectedProject && (
+                                        <Pressable
+                                            style={(p) => [styles.configRow, p.pressed && styles.configRowPressed]}
+                                            onPress={() => togglePicker('path')}
+                                        >
+                                            <Ionicons name="folder-outline" size={15} color={theme.colors.textSecondary} />
+                                            <Text style={styles.configLabel} numberOfLines={1}>
+                                                {pathName}
+                                            </Text>
+                                        </Pressable>
+                                    )}
 
                                     {/* Agent + model + effort row */}
                                     <View style={styles.configRow}>
@@ -1005,8 +1102,8 @@ function NewSessionScreen() {
                                         </Pressable>
                                     )}
 
-                                    {/* Worktree row */}
-                                    {supportsWorktree && (
+                                    {/* Worktree row — hidden when project is selected */}
+                                    {supportsWorktree && !selectedProject && (
                                         <Pressable
                                             style={(p) => [styles.configRow, p.pressed && styles.configRowPressed]}
                                             onPress={() => togglePicker('worktree')}

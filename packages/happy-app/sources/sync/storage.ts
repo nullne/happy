@@ -124,6 +124,7 @@ interface StorageState {
     updateSessionDraft: (sessionId: string, draft: string | null) => void;
     updateSessionPermissionMode: (sessionId: string, mode: string) => void;
     updateSessionModelMode: (sessionId: string, mode: string) => void;
+    updateSessionProjectInfo: (sessionId: string, info: { projectId: string; gitBranch?: string; githubUrl?: string }) => void;
     // Artifact methods
     applyArtifacts: (artifacts: DecryptedArtifact[]) => void;
     addArtifact: (artifact: DecryptedArtifact) => void;
@@ -877,6 +878,22 @@ export const storage = create<StorageState>()((set, get) => {
             return {
                 ...state,
                 sessions: updatedSessions
+            };
+        }),
+        updateSessionProjectInfo: (sessionId: string, info: { projectId: string; gitBranch?: string; githubUrl?: string }) => set((state) => {
+            const session = state.sessions[sessionId];
+            if (!session) return state;
+            return {
+                ...state,
+                sessions: {
+                    ...state.sessions,
+                    [sessionId]: {
+                        ...session,
+                        projectId: info.projectId,
+                        gitBranch: info.gitBranch ?? null,
+                        githubUrl: info.githubUrl ?? null,
+                    }
+                }
             };
         }),
         // Project management methods

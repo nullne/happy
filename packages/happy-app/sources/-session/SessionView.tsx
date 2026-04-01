@@ -32,14 +32,15 @@ import { useDeviceType, useHeaderHeight, useIsLandscape, useIsTablet } from '@/u
 import { formatPathRelativeToHome, getResumeCommandBlock, getSessionAvatarId, getSessionName, useSessionStatus } from '@/utils/sessionUtils';
 import { isVersionSupported, MINIMUM_CLI_VERSION } from '@/utils/versionUtils';
 import * as Clipboard from 'expo-clipboard';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, Octicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import * as React from 'react';
 import { useMemo } from 'react';
-import { ActivityIndicator, Platform, Pressable, Text, View } from 'react-native';
+import { ActivityIndicator, Linking, Platform, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useUnistyles } from 'react-native-unistyles';
 import type { ModelMode, PermissionMode } from '@/components/PermissionModeSelector';
+import { pushAndGetPRUrl, getExistingPRUrl } from '@/utils/gitProject';
 
 export const SessionView = React.memo((props: { id: string }) => {
     const sessionId = props.id;
@@ -448,6 +449,16 @@ function SessionViewLoaded({ sessionId, session }: { sessionId: string, session:
                 </Pressable>
             )}
 
+            {/* PR action bar for project-bound sessions */}
+            {session.githubUrl && session.gitBranch && session.metadata?.machineId && (
+                <PRActionBar
+                    machineId={session.metadata.machineId}
+                    directory={session.metadata?.path ?? ''}
+                    branch={session.gitBranch}
+                    githubUrl={session.githubUrl}
+                />
+            )}
+
             {/* Main content area - no padding since header is overlay */}
             <View style={{ flexBasis: 0, flexGrow: 1, paddingBottom: safeArea.bottom + ((isRunningOnMac() || Platform.OS === 'web') ? 8 : 0) }}>
                 <AgentContentView
@@ -622,3 +633,102 @@ function CenteredInputWidth(props: {
         </View>
     );
 }
+
+/**
+ * Floating bar with Create PR / View PR actions for project-bound sessions.
+ */
+const PRActionBar = React.memo(function PRActionBar({
+    machineId, directory, branch, githubUrl
+}: {
+    machineId: string;
+    directory: string;
+    branch: string;
+    githubUrl: string;
+}) {
+    const { theme } = useUnistyles();
+    const [loading, setLoading] = React.useState(false);
+    const [existingPRUrl, setExistingPRUrl] = React.useState<string | null>(null);
+
+    React.useEffect(() => {
+        let cancelled = false;
+        getExistingPRUrl(machineId, directory, branch, githubUrl).then(url => {
+            if (!cancelled) setExistingPRUrl(url);
+        });
+        return () => { cancelled = true; };
+    }, [machineId, directory, branch, githubUrl]);
+
+    const handleCreatePR = React.useCallback(async () => {
+        setLoading(true);
+        try {
+            const result = await pushAndGetPRUrl(machineId, directory, branch, githubUrl);
+            if (result.success) {
+                Linking.openURL(result.url);
+            } else {
+                Modal.alert(t('common.error'), result.error || 'Failed to push');
+            }
+        } finally {
+            setLoading(false);
+        }
+    }, [machineId, directory, branch, githubUrl]);
+
+    const handleViewPR = React.useCallback(() => {
+        if (existingPRUrl) {
+            Linking.openURL(existingPRUrl);
+        }
+    }, [existingPRUrl]);
+
+    return (
+        <View style={{
+            flexDirection: 'row',
+            justifyContent: 'center',
+            gap: 8,
+            paddingHorizontal: 16,
+            paddingVertical: 6,
+            borderBottomWidth: 1,
+            borderBottomColor: theme.colors.divider,
+            backgroundColor: theme.colors.surface,
+        }}>
+            <Pressable
+                onPress={handleCreatePR}
+                disabled={loading}
+                style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 6,
+                    paddingHorizontal: 12,
+                    paddingVertical: 6,
+                    borderRadius: 8,
+                    backgroundColor: theme.colors.groupped.background,
+                    opacity: loading ? 0.6 : 1,
+                }}
+            >
+                <Octicons name="git-pull-request" size={14} color={theme.colors.textLink} />
+                <Text style={{ fontSize: 13, fontWeight: '600', color: theme.colors.textLink }}>
+                    {loading ? 'Pushing...' : 'Create PR'}
+                </Text>
+            </Pressable>
+            {existingPRUrl && (
+                <Pressable
+                    onPress={handleViewPR}
+                    style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 6,
+                        paddingHorizontal: 12,
+                        paddingVertical: 6,
+                        borderRadius: 8,
+                        backgroundColor: theme.colors.groupped.background,
+                    }}
+                >
+                    <Octicons name="link-external" size={14} color={theme.colors.text} />
+                    <Text style={{ fontSize: 13, fontWeight: '500', color: theme.colors.text }}>
+                        View PR
+                    </Text>
+                </Pressable>
+            )}
+            <Text style={{ fontSize: 11, color: theme.colors.textSecondary, alignSelf: 'center' }} numberOfLines={1}>
+                {branch}
+            </Text>
+        </View>
+    );
+});
