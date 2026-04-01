@@ -13,6 +13,12 @@ function slugify(text: string): string {
         .slice(0, 60);
 }
 
+/** Extract repo name from GitHub URL: https://github.com/org/repo.git → repo */
+function repoNameFromUrl(githubUrl: string): string {
+    const match = githubUrl.match(/\/([^/]+?)(?:\.git)?$/);
+    return match ? match[1] : slugify(githubUrl);
+}
+
 function randomId(length: number): string {
     const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
     let result = '';
@@ -26,12 +32,12 @@ function randomId(length: number): string {
  * Set up a session directory for a project-bound session.
  *
  * Layout:
- *   {workspaceRoot}/{project-slug}/repo    — cached bare-ish clone, kept up to date
- *   {workspaceRoot}/{project-slug}/{id}    — per-session working copy (cp from repo)
+ *   {workspaceRoot}/{project-slug}/repos/{repo-name}  — cached clone per repo, kept on latest main
+ *   {workspaceRoot}/{project-slug}/{session-id}        — per-session working copy (cp from cache)
  *
- * First session: clones the repo into /repo.
- * Subsequent sessions: fetches latest main in /repo, then copies to /{id}.
- * Each session directory gets its own branch.
+ * Supports multiple repos per project in the future.
+ * First session: clones into repos/{name}.
+ * Subsequent sessions: fetches latest in cache, then cp -r to session dir.
  */
 export async function setupProjectSession(
     machineId: string,
@@ -40,7 +46,6 @@ export async function setupProjectSession(
     sessionId: string
 ): Promise<{ success: boolean; directory: string; branch: string; error?: string }> {
     const projectSlug = slugify(project.name);
-    const repoDir = `${workspaceRoot}/${projectSlug}/repo`;
     const sessionDir = `${workspaceRoot}/${projectSlug}/${sessionId}`;
     const branchName = `session/${sessionId}`;
 
@@ -49,15 +54,17 @@ export async function setupProjectSession(
         return { success: true, directory: sessionDir, branch: '' };
     }
 
-    // Step 1: ensure cached repo exists and is up to date
-    const repoCheck = await machineBash(machineId, `git -C "${repoDir}" rev-parse --git-dir`, '/');
+    const repoName = repoNameFromUrl(project.githubUrl);
+    const cacheDir = `${workspaceRoot}/${projectSlug}/repos/${repoName}`;
 
-    if (!repoCheck.success) {
-        // First time — clone into repo dir
-        await machineBash(machineId, `mkdir -p "${repoDir}"`, '/');
+    // Step 1: ensure cached repo exists and is up to date
+    const cacheCheck = await machineBash(machineId, `git -C "${cacheDir}" rev-parse --git-dir`, '/');
+
+    if (!cacheCheck.success) {
+        await machineBash(machineId, `mkdir -p "${cacheDir}"`, '/');
         const cloneResult = await machineBash(
             machineId,
-            `git clone "${project.githubUrl}" "${repoDir}"`,
+            `git clone "${project.githubUrl}" "${cacheDir}"`,
             '/',
             { timeout: 300000 }
         );
@@ -70,11 +77,10 @@ export async function setupProjectSession(
             };
         }
     } else {
-        // Repo exists — fetch latest and reset to default branch
-        const defaultBranch = await detectDefaultBranch(machineId, repoDir);
+        const defaultBranch = await detectDefaultBranch(machineId, cacheDir);
         await machineBash(
             machineId,
-            `git -C "${repoDir}" fetch origin && git -C "${repoDir}" checkout ${defaultBranch} && git -C "${repoDir}" reset --hard "origin/${defaultBranch}"`,
+            `git -C "${cacheDir}" fetch origin && git -C "${cacheDir}" checkout ${defaultBranch} && git -C "${cacheDir}" reset --hard "origin/${defaultBranch}"`,
             '/',
             { timeout: 120000 }
         );
@@ -83,7 +89,7 @@ export async function setupProjectSession(
     // Step 2: copy cached repo to session directory
     const copyResult = await machineBash(
         machineId,
-        `cp -r "${repoDir}" "${sessionDir}"`,
+        `cp -r "${cacheDir}" "${sessionDir}"`,
         '/',
         { timeout: 60000 }
     );
