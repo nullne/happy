@@ -1135,17 +1135,16 @@ function NewSessionScreen() {
 
                             </>
                         ) : (
-                            /* Collapsed: path row + icons row + optional offline warning */
+                            /* Collapsed: project/path row + icons row + optional offline warning */
                             <>
-                                {/* Path row with expand chevron */}
                                 <View style={styles.configRowWithToggle}>
                                     <Pressable
                                         style={(p) => [styles.collapsedRow, { flex: 1 }, p.pressed && styles.configRowPressed]}
-                                        onPress={() => togglePicker('path')}
+                                        onPress={selectedProject ? () => togglePicker('project') : () => togglePicker('path')}
                                     >
-                                        <Ionicons name="folder-outline" size={15} color={theme.colors.textSecondary} />
+                                        <Ionicons name={selectedProject ? 'briefcase-outline' : 'folder-outline'} size={15} color={theme.colors.textSecondary} />
                                         <Text style={[styles.configLabel, { flex: 1 }]} numberOfLines={1}>
-                                            {pathName}
+                                            {selectedProject ? selectedProject.name : pathName}
                                         </Text>
                                     </Pressable>
                                     <Pressable
@@ -1196,8 +1195,8 @@ function NewSessionScreen() {
                                         </Pressable>
                                     )}
 
-                                    {/* Worktree */}
-                                    {supportsWorktree && (
+                                    {/* Worktree — hidden when project selected */}
+                                    {supportsWorktree && !selectedProject && (
                                         <Pressable
                                             onPress={() => togglePicker('worktree')}
                                             hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
