@@ -852,7 +852,8 @@ function NewSessionScreen() {
                     Modal.alert(t('common.error'), 'Machine has no workspace root configured. Update machine hostInfo with workspaceRoot.');
                     return;
                 }
-                const sessionSlug = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+                const promptSlug = prompt.trim().split('\n')[0].slice(0, 40).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'session';
+                const sessionSlug = promptSlug + '-' + Date.now().toString(36).slice(-4);
                 if (selectedProject.githubUrl) {
                     setSpawnStatus('Preparing repo...');
                     const gitResult = await setupProjectSession(
