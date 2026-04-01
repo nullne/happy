@@ -96,6 +96,7 @@ export const SessionView = React.memo((props: { id: string }) => {
             subtitle: subtitle || undefined,
             onSubtitlePress: copyText ? async () => {
                 await Clipboard.setStringAsync(copyText);
+                Modal.alert('Copied', rawPath && branch ? `${rawPath}\n${branch}` : copyText);
             } : undefined,
             avatarId: getSessionAvatarId(session),
             onAvatarPress: () => router.push(`/session/${sessionId}/info`),

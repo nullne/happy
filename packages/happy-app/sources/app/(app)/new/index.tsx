@@ -35,7 +35,7 @@ import { useAllMachines, useSessions, useSetting, storage } from '@/sync/storage
 import type { NewSessionAgentType } from '@/sync/persistence';
 import { sync } from '@/sync/sync';
 import { isMachineOnline } from '@/utils/machineUtils';
-import { machineSpawnNewSession } from '@/sync/ops';
+import { machineSpawnNewSession, linkSessionToProject } from '@/sync/ops';
 import { createWorktree, listWorktrees } from '@/utils/worktree';
 import { resolveAbsolutePath } from '@/utils/pathUtils';
 import { formatPathRelativeToHome, formatLastSeen } from '@/utils/sessionUtils';
@@ -911,8 +911,9 @@ function NewSessionScreen() {
                     storage.getState().updateSessionPermissionMode(result.sessionId, currentPermission.key);
                     storage.getState().updateSessionModelMode(result.sessionId, currentModelKey);
 
-                    // Store project metadata on the session
-                    if (selectedProject) {
+                    // Link session to project (server + local)
+                    if (selectedProject && credentials) {
+                        linkSessionToProject(result.sessionId, selectedProject.id, credentials).catch(() => {});
                         storage.getState().updateSessionProjectInfo(result.sessionId, {
                             projectId: selectedProject.id,
                             gitBranch: gitBranch || undefined,

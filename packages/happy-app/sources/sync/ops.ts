@@ -322,6 +322,15 @@ export async function machineUpdateMetadata(
 /**
  * Abort the current session operation
  */
+export async function linkSessionToProject(sessionId: string, projectId: string, credentials: { token: string }): Promise<void> {
+    const serverUrl = (await import('./serverConfig')).getServerUrl();
+    await fetch(`${serverUrl}/v1/sessions/${sessionId}`, {
+        method: 'PATCH',
+        headers: { 'Authorization': `Bearer ${credentials.token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId })
+    });
+}
+
 export async function sessionAbort(sessionId: string): Promise<void> {
     await apiSocket.sessionRPC(sessionId, 'abort', {
         reason: `The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.`

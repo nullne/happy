@@ -97,6 +97,8 @@ model Session {
     tag               String
     accountId         String
     account           Account          @relation(fields: [accountId], references: [id])
+    projectId         String?
+    project           Project?         @relation(fields: [projectId], references: [id])
     metadata          String
     metadataVersion   Int              @default(0)
     agentState        String?
@@ -113,6 +115,7 @@ model Session {
 
     @@unique([accountId, tag])
     @@index([accountId, updatedAt(sort: Desc)])
+    @@index([projectId])
 }
 
 model SessionMessage {
@@ -396,6 +399,7 @@ model Project {
     updatedAt        DateTime       @updatedAt
     projectAgents    ProjectAgent[]
     tasks            Task[]
+    sessions         Session[]
 
     @@index([accountId])
 }

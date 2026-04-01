@@ -169,7 +169,7 @@ export function sessionRoutes(app: Fastify) {
         const sessions = await db.session.findMany({
             where,
             orderBy,
-            take: limit + 1, // Fetch one extra to determine if there are more
+            take: limit + 1,
             select: {
                 id: true,
                 seq: true,
@@ -182,6 +182,7 @@ export function sessionRoutes(app: Fastify) {
                 dataEncryptionKey: true,
                 active: true,
                 lastActiveAt: true,
+                projectId: true,
             }
         });
 
@@ -209,6 +210,7 @@ export function sessionRoutes(app: Fastify) {
                 agentState: v.agentState,
                 agentStateVersion: v.agentStateVersion,
                 dataEncryptionKey: v.dataEncryptionKey ? Buffer.from(v.dataEncryptionKey).toString('base64') : null,
+                projectId: v.projectId,
             })),
             nextCursor,
             hasNext
@@ -373,5 +375,34 @@ export function sessionRoutes(app: Fastify) {
         }
 
         return reply.send({ success: true });
+    });
+
+    // Link session to a project
+    app.patch('/v1/sessions/:sessionId', {
+        schema: {
+            params: z.object({ sessionId: z.string() }),
+            body: z.object({
+                projectId: z.string().nullish(),
+            })
+        },
+        preHandler: app.authenticate
+    }, async (request, reply) => {
+        const userId = request.userId;
+        const { sessionId } = request.params;
+        const session = await db.session.findFirst({ where: { id: sessionId, accountId: userId } });
+        if (!session) {
+            return reply.code(404).send({ error: 'Session not found' });
+        }
+        if (request.body.projectId) {
+            const project = await db.project.findFirst({ where: { id: request.body.projectId, accountId: userId } });
+            if (!project) {
+                return reply.code(404).send({ error: 'Project not found' });
+            }
+        }
+        const updated = await db.session.update({
+            where: { id: sessionId },
+            data: { projectId: request.body.projectId ?? null }
+        });
+        return reply.send({ ok: true, projectId: updated.projectId });
     });
 }

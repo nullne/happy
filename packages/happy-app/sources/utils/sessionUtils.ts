@@ -149,10 +149,18 @@ export function formatPathRelativeToHome(path: string, homeDir?: string): string
  * Returns the session path for the subtitle.
  */
 export function getSessionSubtitle(session: Session): string {
-    if (session.metadata) {
-        return formatPathRelativeToHome(session.metadata.path, session.metadata.homeDir);
+    if (session.metadata?.summary?.text) {
+        return session.metadata.summary.text;
     }
-    return t('status.unknown');
+    const date = new Date(session.updatedAt);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMin = Math.floor(diffMs / 60000);
+    if (diffMin < 1) return t('time.justNow');
+    if (diffMin < 60) return t('time.minutesAgo', { count: diffMin });
+    const diffHours = Math.floor(diffMin / 60);
+    if (diffHours < 24) return t('time.hoursAgo', { count: diffHours });
+    return t('sessionHistory.daysAgo', { count: Math.floor(diffHours / 24) });
 }
 
 /**

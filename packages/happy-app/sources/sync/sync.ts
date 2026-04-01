@@ -715,6 +715,7 @@ class Sync {
             createdAt: number;
             updatedAt: number;
             lastMessage: ApiMessage | null;
+            projectId: string | null;
         }>;
 
         // Initialize all session encryptions first

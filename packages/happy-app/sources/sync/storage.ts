@@ -336,7 +336,7 @@ export const storage = create<StorageState>()((set, get) => {
                     presence,
                     draft: existingDraft || savedDraft || session.draft || null,
                     permissionMode: resolvedPermissionMode,
-                    projectId: state.sessions[session.id]?.projectId ?? session.projectId ?? null,
+                    projectId: session.projectId ?? state.sessions[session.id]?.projectId ?? null,
                     gitBranch: state.sessions[session.id]?.gitBranch ?? session.gitBranch ?? null,
                     githubUrl: state.sessions[session.id]?.githubUrl ?? session.githubUrl ?? null,
                 };

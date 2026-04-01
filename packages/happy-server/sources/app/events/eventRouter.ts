@@ -345,6 +345,7 @@ export function buildNewSessionUpdate(session: {
     lastActiveAt: Date;
     createdAt: Date;
     updatedAt: Date;
+    projectId?: string | null;
 }, updateSeq: number, updateId: string): UpdatePayload {
     return {
         id: updateId,
@@ -361,7 +362,8 @@ export function buildNewSessionUpdate(session: {
             active: session.active,
             activeAt: session.lastActiveAt.getTime(),
             createdAt: session.createdAt.getTime(),
-            updatedAt: session.updatedAt.getTime()
+            updatedAt: session.updatedAt.getTime(),
+            projectId: session.projectId ?? null,
         },
         createdAt: Date.now()
     };
