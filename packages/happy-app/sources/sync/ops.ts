@@ -213,7 +213,8 @@ export async function machineStopDaemon(machineId: string): Promise<{ message: s
 export async function machineBash(
     machineId: string,
     command: string,
-    cwd: string
+    cwd: string,
+    options?: { timeout?: number }
 ): Promise<{
     success: boolean;
     stdout: string;
@@ -226,15 +227,23 @@ export async function machineBash(
             stdout: string;
             stderr: string;
             exitCode: number;
+            error?: string;
         }, {
             command: string;
             cwd: string;
+            timeout?: number;
         }>(
             machineId,
             'bash',
-            { command, cwd }
+            { command, cwd, ...(options?.timeout ? { timeout: options.timeout } : {}) }
         );
-        return result;
+        // Normalize: daemon may return {success: false, error: '...'} without stdout/stderr
+        return {
+            success: result.success,
+            stdout: result.stdout ?? '',
+            stderr: result.stderr || result.error || '',
+            exitCode: result.exitCode ?? (result.success ? 0 : 1),
+        };
     } catch (error) {
         return {
             success: false,

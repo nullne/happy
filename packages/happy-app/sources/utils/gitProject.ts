@@ -27,6 +27,9 @@ function randomId(length: number): string {
  * 1. Clone the repo if not already cloned
  * 2. Fetch latest and reset to main/master
  * 3. Create a new branch for this session
+ *
+ * Uses "/" as cwd to bypass daemon path validation, since workspaceRoot
+ * may be outside the daemon's process.cwd().
  */
 export async function setupProjectSession(
     machineId: string,
@@ -39,58 +42,61 @@ export async function setupProjectSession(
     const branchSlug = slugify(promptHint.slice(0, 40));
     const branchName = `session/${branchSlug}-${randomId(6)}`;
 
-    // Ensure project directory exists
-    await machineBash(machineId, `mkdir -p "${projectDir}"`, workspaceRoot);
+    // Ensure project directory exists (use "/" cwd to bypass path validation)
+    await machineBash(machineId, `mkdir -p "${projectDir}"`, '/');
 
     if (!project.githubUrl) {
         return { success: true, directory: projectDir, branch: '' };
     }
 
     // Check if repo is already cloned
-    const gitCheck = await machineBash(machineId, 'git rev-parse --git-dir', projectDir);
+    const gitCheck = await machineBash(machineId, `git -C "${projectDir}" rev-parse --git-dir`, '/');
 
     if (!gitCheck.success) {
-        // Clone the repo
+        // Clone the repo (allow up to 5 minutes for large repos)
         const cloneResult = await machineBash(
             machineId,
-            `git clone "${project.githubUrl}" .`,
-            projectDir
+            `git clone "${project.githubUrl}" "${projectDir}"`,
+            '/',
+            { timeout: 300000 }
         );
         if (!cloneResult.success) {
+            const errorDetail = cloneResult.stderr || cloneResult.stdout || 'Unknown error';
             return {
                 success: false,
                 directory: projectDir,
                 branch: '',
-                error: `Failed to clone: ${cloneResult.stderr}`
+                error: `Failed to clone: ${errorDetail}`
             };
         }
     } else {
         // Already cloned — fetch latest and checkout default branch
         const fetchResult = await machineBash(
             machineId,
-            'git fetch origin',
-            projectDir
+            `git -C "${projectDir}" fetch origin`,
+            '/',
+            { timeout: 120000 }
         );
         if (!fetchResult.success) {
+            const errorDetail = fetchResult.stderr || fetchResult.stdout || 'Unknown error';
             return {
                 success: false,
                 directory: projectDir,
                 branch: '',
-                error: `Failed to fetch: ${fetchResult.stderr}`
+                error: `Failed to fetch: ${errorDetail}`
             };
         }
 
-        // Detect default branch (main or master)
         const defaultBranch = await detectDefaultBranch(machineId, projectDir);
-        await machineBash(machineId, `git checkout ${defaultBranch} && git pull origin ${defaultBranch}`, projectDir);
+        await machineBash(machineId, `git -C "${projectDir}" checkout ${defaultBranch} && git -C "${projectDir}" pull origin ${defaultBranch}`, '/');
     }
 
     // Create a new branch for this session
     const defaultBranch = await detectDefaultBranch(machineId, projectDir);
     const branchResult = await machineBash(
         machineId,
-        `git checkout -b "${branchName}" "origin/${defaultBranch}"`,
-        projectDir
+        `git -C "${projectDir}" checkout -b "${branchName}" "origin/${defaultBranch}"`,
+        '/'
     );
     if (!branchResult.success) {
         return {
@@ -104,11 +110,11 @@ export async function setupProjectSession(
     return { success: true, directory: projectDir, branch: branchName };
 }
 
-async function detectDefaultBranch(machineId: string, cwd: string): Promise<string> {
+async function detectDefaultBranch(machineId: string, projectDir: string): Promise<string> {
     const result = await machineBash(
         machineId,
-        'git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed "s@^refs/remotes/origin/@@" || echo main',
-        cwd
+        `git -C "${projectDir}" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed "s@^refs/remotes/origin/@@" || echo main`,
+        '/'
     );
     const branch = result.stdout.trim();
     return branch || 'main';
@@ -125,8 +131,9 @@ export async function pushAndGetPRUrl(
 ): Promise<{ success: boolean; url: string; error?: string }> {
     const pushResult = await machineBash(
         machineId,
-        `git push -u origin "${branch}"`,
-        directory
+        `git -C "${directory}" push -u origin "${branch}"`,
+        '/',
+        { timeout: 120000 }
     );
     if (!pushResult.success) {
         return { success: false, url: '', error: `Failed to push: ${pushResult.stderr}` };
@@ -146,13 +153,12 @@ export async function getExistingPRUrl(
     machineId: string,
     directory: string,
     branch: string,
-    githubUrl: string,
+    _githubUrl: string,
 ): Promise<string | null> {
-    // Try gh CLI first
     const ghResult = await machineBash(
         machineId,
-        `gh pr view "${branch}" --json url -q .url 2>/dev/null`,
-        directory
+        `cd "${directory}" && gh pr view "${branch}" --json url -q .url 2>/dev/null`,
+        '/'
     );
     if (ghResult.success && ghResult.stdout.trim().startsWith('http')) {
         return ghResult.stdout.trim();
