@@ -84,12 +84,19 @@ export const SessionView = React.memo((props: { id: string }) => {
 
         // Normal state - show session info
         const isConnected = session.presence === 'online';
-        const pathDisplay = session.metadata?.path ? formatPathRelativeToHome(session.metadata.path, session.metadata?.homeDir) : undefined;
-        const branchDisplay = session.gitBranch ? `⎇ ${session.gitBranch}` : undefined;
+        const rawPath = session.metadata?.path;
+        const pathDisplay = rawPath ? formatPathRelativeToHome(rawPath, session.metadata?.homeDir) : undefined;
+        const branch = session.gitBranch;
+        const branchDisplay = branch ? `⎇ ${branch}` : undefined;
         const subtitle = [pathDisplay, branchDisplay].filter(Boolean).join('  ');
+
+        const copyText = [rawPath, branch].filter(Boolean).join('\n');
         return {
             title: getSessionName(session),
             subtitle: subtitle || undefined,
+            onSubtitlePress: copyText ? async () => {
+                await Clipboard.setStringAsync(copyText);
+            } : undefined,
             avatarId: getSessionAvatarId(session),
             onAvatarPress: () => router.push(`/session/${sessionId}/info`),
             isConnected: isConnected,

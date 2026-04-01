@@ -15,6 +15,7 @@ import { useUnistyles } from 'react-native-unistyles';
 interface ChatHeaderViewProps {
     title: string;
     subtitle?: string;
+    onSubtitlePress?: () => void;
     onBackPress?: () => void;
     onAvatarPress?: () => void;
     avatarId?: string;
@@ -32,6 +33,7 @@ interface ChatHeaderViewProps {
 export const ChatHeaderView: React.FC<ChatHeaderViewProps> = ({
     title,
     subtitle,
+    onSubtitlePress,
     onBackPress,
     onAvatarPress,
     avatarId,
@@ -140,20 +142,22 @@ export const ChatHeaderView: React.FC<ChatHeaderViewProps> = ({
                             {title}
                         </Text>
                         {subtitle && (
-                            <Text
-                                numberOfLines={1}
-                                ellipsizeMode="tail"
-                                style={[
-                                    styles.subtitle,
-                                    {
-                                        color: theme.colors.header.tint,
-                                        opacity: 0.7,
-                                        ...Typography.default()
-                                    }
-                                ]}
-                            >
-                                {subtitle}
-                            </Text>
+                            <Pressable onPress={onSubtitlePress} disabled={!onSubtitlePress}>
+                                <Text
+                                    numberOfLines={1}
+                                    ellipsizeMode="tail"
+                                    style={[
+                                        styles.subtitle,
+                                        {
+                                            color: theme.colors.header.tint,
+                                            opacity: 0.7,
+                                            ...Typography.default()
+                                        }
+                                    ]}
+                                >
+                                    {subtitle}
+                                </Text>
+                            </Pressable>
                         )}
                     </View>
 

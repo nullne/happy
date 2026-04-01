@@ -850,9 +850,10 @@ function NewSessionScreen() {
                     Modal.alert(t('common.error'), 'Machine has no workspace root configured. Update machine hostInfo with workspaceRoot.');
                     return;
                 }
+                const sessionSlug = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
                 if (selectedProject.githubUrl) {
                     const gitResult = await setupProjectSession(
-                        selectedMachineId, workspaceRoot, selectedProject, prompt.trim() || 'session'
+                        selectedMachineId, workspaceRoot, selectedProject, sessionSlug
                     );
                     if (!gitResult.success) {
                         Modal.alert(t('common.error'), gitResult.error || 'Failed to setup project');
@@ -862,7 +863,7 @@ function NewSessionScreen() {
                     gitBranch = gitResult.branch;
                 } else {
                     const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60);
-                    spawnDirectory = `${workspaceRoot}/${slugify(selectedProject.name)}`;
+                    spawnDirectory = `${workspaceRoot}/${slugify(selectedProject.name)}/${sessionSlug}`;
                 }
                 approvedNewDirectoryCreation = true;
             } else {

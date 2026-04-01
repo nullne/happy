@@ -23,10 +23,9 @@ function randomId(length: number): string {
 }
 
 /**
- * Set up a project directory for a new session:
- * 1. Clone the repo if not already cloned
- * 2. Fetch latest and reset to main/master
- * 3. Create a new branch for this session
+ * Set up a session directory for a project-bound session:
+ * Directory: {workspaceRoot}/{project-slug}/{session-id}
+ * Each session gets its own fresh clone with a new branch.
  *
  * Uses "/" as cwd to bypass daemon path validation, since workspaceRoot
  * may be outside the daemon's process.cwd().
@@ -35,79 +34,53 @@ export async function setupProjectSession(
     machineId: string,
     workspaceRoot: string,
     project: ProjectConfig,
-    promptHint: string
+    sessionId: string
 ): Promise<{ success: boolean; directory: string; branch: string; error?: string }> {
     const projectSlug = slugify(project.name);
-    const projectDir = `${workspaceRoot}/${projectSlug}`;
-    const branchSlug = slugify(promptHint.slice(0, 40));
-    const branchName = `session/${branchSlug}-${randomId(6)}`;
+    const sessionDir = `${workspaceRoot}/${projectSlug}/${sessionId}`;
+    const branchName = `session/${sessionId}`;
 
-    // Ensure project directory exists (use "/" cwd to bypass path validation)
-    await machineBash(machineId, `mkdir -p "${projectDir}"`, '/');
+    // Ensure session directory exists
+    await machineBash(machineId, `mkdir -p "${sessionDir}"`, '/');
 
     if (!project.githubUrl) {
-        return { success: true, directory: projectDir, branch: '' };
+        return { success: true, directory: sessionDir, branch: '' };
     }
 
-    // Check if repo is already cloned
-    const gitCheck = await machineBash(machineId, `git -C "${projectDir}" rev-parse --git-dir`, '/');
-
-    if (!gitCheck.success) {
-        // Clone the repo (allow up to 5 minutes for large repos)
-        const cloneResult = await machineBash(
-            machineId,
-            `git clone "${project.githubUrl}" "${projectDir}"`,
-            '/',
-            { timeout: 300000 }
-        );
-        if (!cloneResult.success) {
-            const errorDetail = cloneResult.stderr || cloneResult.stdout || 'Unknown error';
-            return {
-                success: false,
-                directory: projectDir,
-                branch: '',
-                error: `Failed to clone: ${errorDetail}`
-            };
-        }
-    } else {
-        // Already cloned — fetch latest and checkout default branch
-        const fetchResult = await machineBash(
-            machineId,
-            `git -C "${projectDir}" fetch origin`,
-            '/',
-            { timeout: 120000 }
-        );
-        if (!fetchResult.success) {
-            const errorDetail = fetchResult.stderr || fetchResult.stdout || 'Unknown error';
-            return {
-                success: false,
-                directory: projectDir,
-                branch: '',
-                error: `Failed to fetch: ${errorDetail}`
-            };
-        }
-
-        const defaultBranch = await detectDefaultBranch(machineId, projectDir);
-        await machineBash(machineId, `git -C "${projectDir}" checkout ${defaultBranch} && git -C "${projectDir}" pull origin ${defaultBranch}`, '/');
+    // Clone repo into the session directory
+    const cloneResult = await machineBash(
+        machineId,
+        `git clone "${project.githubUrl}" "${sessionDir}"`,
+        '/',
+        { timeout: 300000 }
+    );
+    if (!cloneResult.success) {
+        const errorDetail = cloneResult.stderr || cloneResult.stdout || 'Unknown error';
+        return {
+            success: false,
+            directory: sessionDir,
+            branch: '',
+            error: `Failed to clone: ${errorDetail}`
+        };
     }
 
     // Create a new branch for this session
-    const defaultBranch = await detectDefaultBranch(machineId, projectDir);
+    const defaultBranch = await detectDefaultBranch(machineId, sessionDir);
     const branchResult = await machineBash(
         machineId,
-        `git -C "${projectDir}" checkout -b "${branchName}" "origin/${defaultBranch}"`,
+        `git -C "${sessionDir}" checkout -b "${branchName}" "origin/${defaultBranch}"`,
         '/'
     );
     if (!branchResult.success) {
         return {
             success: false,
-            directory: projectDir,
+            directory: sessionDir,
             branch: '',
             error: `Failed to create branch: ${branchResult.stderr}`
         };
     }
 
-    return { success: true, directory: projectDir, branch: branchName };
+    return { success: true, directory: sessionDir, branch: branchName };
 }
 
 async function detectDefaultBranch(machineId: string, projectDir: string): Promise<string> {
