@@ -15,6 +15,8 @@ import { StyleSheet, useUnistyles } from 'react-native-unistyles';
 import { t } from '@/text';
 import { useInboxHasContent } from '@/hooks/useInboxHasContent';
 import { Ionicons } from '@expo/vector-icons';
+import { useAuth } from '@/auth/AuthContext';
+import { useActiveProject, useProjects, useActiveProjectStore, loadProjects } from '@/hooks/useActiveProject';
 
 const stylesheet = StyleSheet.create((theme, runtime) => ({
     container: {
@@ -188,14 +190,31 @@ export const SidebarView = React.memo(() => {
     // 4 icons (tasks, inbox, settings, +) ~148px total, threshold 408px > max 360px → always left-justify
     const shouldLeftJustify = true;
 
+    const { credentials } = useAuth();
+    const projects = useProjects();
+    const activeProject = useActiveProject();
+    const setActiveProjectId = useActiveProjectStore(s => s.setActiveProjectId);
+    const [showProjectPicker, setShowProjectPicker] = React.useState(false);
+
+    React.useEffect(() => {
+        if (credentials) loadProjects(credentials);
+    }, [credentials]);
+
     const handleNewSession = React.useCallback(() => {
         router.navigate('/new');
     }, [router]);
 
-    // Title content used in both centered and left-justified modes (DRY)
     const titleContent = (
         <>
-            <Text style={styles.titleText}>{t('sidebar.sessionsTitle')}</Text>
+            <Pressable
+                onPress={() => setShowProjectPicker(v => !v)}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
+            >
+                <Text style={styles.titleText} numberOfLines={1}>
+                    {activeProject ? activeProject.name : t('sidebar.sessionsTitle')}
+                </Text>
+                <Ionicons name="chevron-down" size={14} color={theme.colors.header.tint} />
+            </Pressable>
             {connectionStatus.text && (
                 <View style={styles.statusContainer}>
                     <StatusDot
@@ -295,6 +314,50 @@ export const SidebarView = React.memo(() => {
                 </View>
                 {realtimeStatus !== 'disconnected' && (
                     <VoiceAssistantStatusBar variant="sidebar" />
+                )}
+                {showProjectPicker && (
+                    <View style={{
+                        backgroundColor: theme.colors.surface,
+                        borderBottomWidth: 1,
+                        borderBottomColor: theme.colors.divider,
+                        paddingHorizontal: 12,
+                        paddingVertical: 8,
+                    }}>
+                        <Pressable
+                            onPress={() => { setActiveProjectId(null); setShowProjectPicker(false); }}
+                            style={{
+                                paddingVertical: 8,
+                                paddingHorizontal: 12,
+                                borderRadius: 8,
+                                backgroundColor: !activeProject ? theme.colors.groupped.background : undefined,
+                            }}
+                        >
+                            <Text style={{ fontSize: 14, color: theme.colors.text, fontWeight: !activeProject ? '600' : '400' }}>
+                                All Sessions
+                            </Text>
+                        </Pressable>
+                        {projects.map(p => (
+                            <Pressable
+                                key={p.id}
+                                onPress={() => { setActiveProjectId(p.id); setShowProjectPicker(false); }}
+                                style={{
+                                    paddingVertical: 8,
+                                    paddingHorizontal: 12,
+                                    borderRadius: 8,
+                                    backgroundColor: activeProject?.id === p.id ? theme.colors.groupped.background : undefined,
+                                }}
+                            >
+                                <Text style={{ fontSize: 14, color: theme.colors.text, fontWeight: activeProject?.id === p.id ? '600' : '400' }} numberOfLines={1}>
+                                    {p.name}
+                                </Text>
+                                {p.githubUrl && (
+                                    <Text style={{ fontSize: 11, color: theme.colors.textSecondary }} numberOfLines={1}>
+                                        {p.githubUrl.replace(/^https?:\/\/(www\.)?github\.com\//, '')}
+                                    </Text>
+                                )}
+                            </Pressable>
+                        ))}
+                    </View>
                 )}
                 <MainView variant="sidebar" />
             </View>

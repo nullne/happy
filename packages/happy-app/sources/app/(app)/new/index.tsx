@@ -44,9 +44,10 @@ import { useNewSessionDraft } from '@/hooks/useNewSessionDraft';
 import { Modal } from '@/modal';
 import type { Machine, Session } from '@/sync/storageTypes';
 import { useAuth } from '@/auth/AuthContext';
-import { fetchProjects, ProjectConfig } from '@/sync/apiProjects';
+import { ProjectConfig } from '@/sync/apiProjects';
 import { fetchMachinesRest, MachineHostInfo } from '@/sync/apiMachinesRest';
 import { setupProjectSession } from '@/utils/gitProject';
+import { useActiveProjectStore, useActiveProject, useProjects } from '@/hooks/useActiveProject';
 import {
     getHardcodedPermissionModes,
     getHardcodedModelModes,
@@ -498,15 +499,22 @@ function NewSessionScreen() {
         draft.setSessionType(worktreeKey !== '__none__' ? 'worktree' : 'simple');
     }, [worktreeKey]);
 
-    // Project state
+    // Project state — uses global active project as default
     const { credentials } = useAuth();
-    const [projects, setProjects] = React.useState<ProjectConfig[]>([]);
+    const projects = useProjects();
+    const globalActiveProject = useActiveProject();
     const [selectedProjectId, setSelectedProjectId] = React.useState<string | null>(null);
     const [machineHostInfo, setMachineHostInfo] = React.useState<Record<string, MachineHostInfo | null>>({});
 
+    // Pre-fill from global project context on mount
+    React.useEffect(() => {
+        if (globalActiveProject && selectedProjectId === null) {
+            setSelectedProjectId(globalActiveProject.id);
+        }
+    }, [globalActiveProject]);
+
     React.useEffect(() => {
         if (!credentials) return;
-        fetchProjects(credentials).then(setProjects).catch(() => {});
         fetchMachinesRest(credentials).then(machines => {
             const info: Record<string, MachineHostInfo | null> = {};
             for (const m of machines) {
