@@ -1,0 +1,102 @@
+name: Deploy to Personal Machine
+
+on:
+  workflow_run:
+    workflows: ["Build and Release"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Docker image tag to deploy (e.g. 1.2.3 or sha-abc1234)"
+        required: false
+        default: ""
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: ghcr.io/${{ github.repository_owner }}/happy/server-standalone
+
+jobs:
+  deploy:
+    runs-on: [self-hosted]
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    timeout-minutes: 10
+
+    steps:
+      - name: Determine image tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.image_tag }}"
+          else
+            REF="${{ github.event.workflow_run.head_branch }}"
+            # Strip 'v' prefix for semver tags (docker metadata produces 1.2.3 not v1.2.3)
+            TAG="${REF#v}"
+          fi
+          # Fall back to sha-based tag
+          if [ -z "$TAG" ]; then
+            SHA="${{ github.event.workflow_run.head_sha || github.sha }}"
+            TAG="sha-${SHA:0:7}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Deploying image tag: $TAG"
+
+      - name: Log in to GitHub Container Registry
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Pull new image
+        run: docker pull "${{ env.IMAGE }}:${{ steps.tag.outputs.tag }}"
+
+      - name: Write docker-compose file
+        run: |
+          mkdir -p /opt/happy
+          cat > /opt/happy/docker-compose.yml << 'EOF'
+          services:
+            server:
+              image: ${HAPPY_IMAGE}
+              container_name: happy-server
+              restart: unless-stopped
+              ports:
+                - "3005:3005"
+              volumes:
+                - happy-data:/data
+              environment:
+                - HANDY_MASTER_SECRET=${HANDY_MASTER_SECRET}
+                - NODE_ENV=production
+              healthcheck:
+                test: ["CMD", "wget", "--spider", "-q", "http://localhost:3005/health"]
+                interval: 10s
+                timeout: 5s
+                retries: 3
+                start_period: 30s
+          volumes:
+            happy-data:
+          EOF
+
+      - name: Deploy with docker compose
+        working-directory: /opt/happy
+        env:
+          HAPPY_IMAGE: "${{ env.IMAGE }}:${{ steps.tag.outputs.tag }}"
+          HANDY_MASTER_SECRET: ${{ secrets.HANDY_MASTER_SECRET }}
+        run: docker compose up -d --remove-orphans
+
+      - name: Wait for health check
+        run: |
+          echo "Waiting for server to become healthy..."
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3005/health > /dev/null 2>&1; then
+              echo "Health check passed on attempt $i"
+              curl -s http://localhost:3005/health
+              exit 0
+            fi
+            echo "Attempt $i/30 - not ready yet, waiting 5s..."
+            sleep 5
+          done
+          echo "Health check failed after 150 seconds"
+          docker logs happy-server --tail 50
+          exit 1
+
+      - name: Clean up old images
+        if: always()
+        run: docker image prune -f --filter "until=168h"
