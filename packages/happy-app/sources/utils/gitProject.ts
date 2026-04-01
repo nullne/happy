@@ -23,12 +23,15 @@ function randomId(length: number): string {
 }
 
 /**
- * Set up a session directory for a project-bound session:
- * Directory: {workspaceRoot}/{project-slug}/{session-id}
- * Each session gets its own fresh clone with a new branch.
+ * Set up a session directory for a project-bound session.
  *
- * Uses "/" as cwd to bypass daemon path validation, since workspaceRoot
- * may be outside the daemon's process.cwd().
+ * Layout:
+ *   {workspaceRoot}/{project-slug}/repo    — cached bare-ish clone, kept up to date
+ *   {workspaceRoot}/{project-slug}/{id}    — per-session working copy (cp from repo)
+ *
+ * First session: clones the repo into /repo.
+ * Subsequent sessions: fetches latest main in /repo, then copies to /{id}.
+ * Each session directory gets its own branch.
  */
 export async function setupProjectSession(
     machineId: string,
@@ -37,34 +40,63 @@ export async function setupProjectSession(
     sessionId: string
 ): Promise<{ success: boolean; directory: string; branch: string; error?: string }> {
     const projectSlug = slugify(project.name);
+    const repoDir = `${workspaceRoot}/${projectSlug}/repo`;
     const sessionDir = `${workspaceRoot}/${projectSlug}/${sessionId}`;
     const branchName = `session/${sessionId}`;
 
-    // Ensure session directory exists
-    await machineBash(machineId, `mkdir -p "${sessionDir}"`, '/');
-
     if (!project.githubUrl) {
+        await machineBash(machineId, `mkdir -p "${sessionDir}"`, '/');
         return { success: true, directory: sessionDir, branch: '' };
     }
 
-    // Clone repo into the session directory
-    const cloneResult = await machineBash(
+    // Step 1: ensure cached repo exists and is up to date
+    const repoCheck = await machineBash(machineId, `git -C "${repoDir}" rev-parse --git-dir`, '/');
+
+    if (!repoCheck.success) {
+        // First time — clone into repo dir
+        await machineBash(machineId, `mkdir -p "${repoDir}"`, '/');
+        const cloneResult = await machineBash(
+            machineId,
+            `git clone "${project.githubUrl}" "${repoDir}"`,
+            '/',
+            { timeout: 300000 }
+        );
+        if (!cloneResult.success) {
+            return {
+                success: false,
+                directory: sessionDir,
+                branch: '',
+                error: `Failed to clone: ${cloneResult.stderr || cloneResult.stdout || 'Unknown error'}`
+            };
+        }
+    } else {
+        // Repo exists — fetch latest and reset to default branch
+        const defaultBranch = await detectDefaultBranch(machineId, repoDir);
+        await machineBash(
+            machineId,
+            `git -C "${repoDir}" fetch origin && git -C "${repoDir}" checkout ${defaultBranch} && git -C "${repoDir}" reset --hard "origin/${defaultBranch}"`,
+            '/',
+            { timeout: 120000 }
+        );
+    }
+
+    // Step 2: copy cached repo to session directory
+    const copyResult = await machineBash(
         machineId,
-        `git clone "${project.githubUrl}" "${sessionDir}"`,
+        `cp -r "${repoDir}" "${sessionDir}"`,
         '/',
-        { timeout: 300000 }
+        { timeout: 60000 }
     );
-    if (!cloneResult.success) {
-        const errorDetail = cloneResult.stderr || cloneResult.stdout || 'Unknown error';
+    if (!copyResult.success) {
         return {
             success: false,
             directory: sessionDir,
             branch: '',
-            error: `Failed to clone: ${errorDetail}`
+            error: `Failed to copy repo: ${copyResult.stderr || 'Unknown error'}`
         };
     }
 
-    // Create a new branch for this session
+    // Step 3: create session branch in the working copy
     const defaultBranch = await detectDefaultBranch(machineId, sessionDir);
     const branchResult = await machineBash(
         machineId,
