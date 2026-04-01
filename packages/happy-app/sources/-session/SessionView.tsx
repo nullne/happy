@@ -21,7 +21,7 @@ import { voiceHooks } from '@/realtime/hooks/voiceHooks';
 import { startRealtimeSession, stopRealtimeSession } from '@/realtime/RealtimeSession';
 import { gitStatusSync } from '@/sync/gitStatusSync';
 import { sessionAbort } from '@/sync/ops';
-import { storage, useIsDataReady, useLocalSetting, useRealtimeStatus, useSessionMessages, useSessionUsage, useSetting } from '@/sync/storage';
+import { storage, useIsDataReady, useLocalSetting, useRealtimeStatus, useSessionMessages, useSessionUsage, useSetting, useSessionGitStatus } from '@/sync/storage';
 import { useSession } from '@/sync/storage';
 import { Session } from '@/sync/storageTypes';
 import { sync } from '@/sync/sync';
@@ -55,6 +55,7 @@ export const SessionView = React.memo((props: { id: string }) => {
     const realtimeStatus = useRealtimeStatus();
     const isTablet = useIsTablet();
     const [sessionActionsAnchor, setSessionActionsAnchor] = React.useState<SessionActionsAnchor | null>(null);
+    const [copyToast, setCopyToast] = React.useState(false);
 
     // Compute header props based on session state
     const headerProps = useMemo(() => {
@@ -96,7 +97,8 @@ export const SessionView = React.memo((props: { id: string }) => {
             subtitle: subtitle || undefined,
             onSubtitlePress: copyText ? async () => {
                 await Clipboard.setStringAsync(copyText);
-                Modal.alert('Copied', rawPath && branch ? `${rawPath}\n${branch}` : copyText);
+                setCopyToast(true);
+                setTimeout(() => setCopyToast(false), 2000);
             } : undefined,
             avatarId: getSessionAvatarId(session),
             onAvatarPress: () => router.push(`/session/${sessionId}/info`),
@@ -157,6 +159,26 @@ export const SessionView = React.memo((props: { id: string }) => {
                     {!isTablet && realtimeStatus !== 'disconnected' && (
                         <VoiceAssistantStatusBar variant="full" />
                     )}
+                </View>
+            )}
+
+            {/* Copy toast */}
+            {copyToast && (
+                <View style={{
+                    position: 'absolute',
+                    top: safeArea.top + headerHeight + 8,
+                    alignSelf: 'center',
+                    backgroundColor: theme.colors.text,
+                    borderRadius: 20,
+                    paddingHorizontal: 14,
+                    paddingVertical: 7,
+                    zIndex: 1001,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 6,
+                }}>
+                    <Ionicons name="checkmark" size={14} color={theme.colors.surface} />
+                    <Text style={{ fontSize: 13, color: theme.colors.surface, fontWeight: '600' }}>Copied</Text>
                 </View>
             )}
 
@@ -460,9 +482,10 @@ function SessionViewLoaded({ sessionId, session }: { sessionId: string, session:
                 </Pressable>
             )}
 
-            {/* PR action bar for project-bound sessions */}
+            {/* PR action bar for project-bound sessions — only when there are changes */}
             {session.githubUrl && session.gitBranch && session.metadata?.machineId && (
                 <PRActionBar
+                    sessionId={sessionId}
                     machineId={session.metadata.machineId}
                     directory={session.metadata?.path ?? ''}
                     branch={session.gitBranch}
@@ -646,17 +669,20 @@ function CenteredInputWidth(props: {
 }
 
 /**
- * Floating bar with Create PR / View PR actions for project-bound sessions.
+ * PR action bar for project-bound sessions.
+ * Only shows "Create PR" when git status indicates there are changes (isDirty).
  */
 const PRActionBar = React.memo(function PRActionBar({
-    machineId, directory, branch, githubUrl
+    sessionId, machineId, directory, branch, githubUrl
 }: {
+    sessionId: string;
     machineId: string;
     directory: string;
     branch: string;
     githubUrl: string;
 }) {
     const { theme } = useUnistyles();
+    const gitStatus = useSessionGitStatus(sessionId);
     const [loading, setLoading] = React.useState(false);
     const [existingPRUrl, setExistingPRUrl] = React.useState<string | null>(null);
 
@@ -667,6 +693,8 @@ const PRActionBar = React.memo(function PRActionBar({
         });
         return () => { cancelled = true; };
     }, [machineId, directory, branch, githubUrl]);
+
+    const hasDiff = gitStatus?.isDirty || (gitStatus && gitStatus.modifiedCount > 0);
 
     const handleCreatePR = React.useCallback(async () => {
         setLoading(true);
@@ -688,6 +716,9 @@ const PRActionBar = React.memo(function PRActionBar({
         }
     }, [existingPRUrl]);
 
+    // Don't show anything if no diff and no existing PR
+    if (!hasDiff && !existingPRUrl) return null;
+
     return (
         <View style={{
             flexDirection: 'row',
@@ -699,25 +730,27 @@ const PRActionBar = React.memo(function PRActionBar({
             borderBottomColor: theme.colors.divider,
             backgroundColor: theme.colors.surface,
         }}>
-            <Pressable
-                onPress={handleCreatePR}
-                disabled={loading}
-                style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    gap: 6,
-                    paddingHorizontal: 12,
-                    paddingVertical: 6,
-                    borderRadius: 8,
-                    backgroundColor: theme.colors.groupped.background,
-                    opacity: loading ? 0.6 : 1,
-                }}
-            >
-                <Octicons name="git-pull-request" size={14} color={theme.colors.textLink} />
-                <Text style={{ fontSize: 13, fontWeight: '600', color: theme.colors.textLink }}>
-                    {loading ? 'Pushing...' : 'Create PR'}
-                </Text>
-            </Pressable>
+            {hasDiff && (
+                <Pressable
+                    onPress={handleCreatePR}
+                    disabled={loading}
+                    style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 6,
+                        paddingHorizontal: 12,
+                        paddingVertical: 6,
+                        borderRadius: 8,
+                        backgroundColor: theme.colors.groupped.background,
+                        opacity: loading ? 0.6 : 1,
+                    }}
+                >
+                    <Octicons name="git-pull-request" size={14} color={theme.colors.textLink} />
+                    <Text style={{ fontSize: 13, fontWeight: '600', color: theme.colors.textLink }}>
+                        {loading ? 'Pushing...' : 'Create PR'}
+                    </Text>
+                </Pressable>
+            )}
             {existingPRUrl && (
                 <Pressable
                     onPress={handleViewPR}
@@ -737,9 +770,6 @@ const PRActionBar = React.memo(function PRActionBar({
                     </Text>
                 </Pressable>
             )}
-            <Text style={{ fontSize: 11, color: theme.colors.textSecondary, alignSelf: 'center' }} numberOfLines={1}>
-                {branch}
-            </Text>
         </View>
     );
 });
