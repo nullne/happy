@@ -21,6 +21,7 @@ import { UpdateBanner } from './UpdateBanner';
 import { layout } from './layout';
 import { useNavigateToSession } from '@/hooks/useNavigateToSession';
 import { SessionActionsAnchor, SessionActionsPopover } from './SessionActionsPopover';
+import { useActiveProjectStore, useProjects } from '@/hooks/useActiveProject';
 
 const stylesheet = StyleSheet.create((theme) => ({
     container: {
@@ -312,6 +313,11 @@ const SessionItem = React.memo(({ session, selected, isFirst, isLast, isSingle }
     const sessionStatus = useSessionStatus(session);
     const sessionName = getSessionName(session);
     const sessionSubtitle = getSessionSubtitle(session);
+    const activeProjectId = useActiveProjectStore(s => s.activeProjectId);
+    const projects = useProjects();
+    const projectName = !activeProjectId && session.projectId
+        ? projects.find(p => p.id === session.projectId)?.name ?? null
+        : null;
     const navigateToSession = useNavigateToSession();
     const [actionsAnchor, setActionsAnchor] = React.useState<SessionActionsAnchor | null>(null);
 
@@ -383,7 +389,7 @@ const SessionItem = React.memo(({ session, selected, isFirst, isLast, isSingle }
                     {sessionSubtitle}
                 </Text>
 
-                {/* Status line with dot */}
+                {/* Status line with dot + optional project tag */}
                 <View style={styles.statusRow}>
                     <View style={styles.statusDotContainer}>
                         <StatusDot color={sessionStatus.statusDotColor} isPulsing={sessionStatus.isPulsing} />
@@ -394,6 +400,11 @@ const SessionItem = React.memo(({ session, selected, isFirst, isLast, isSingle }
                     ]}>
                         {sessionStatus.statusText}
                     </Text>
+                    {projectName && (
+                        <Text style={[styles.statusText, { color: sessionStatus.statusColor, opacity: 0.6 }]}>
+                            {' · '}{projectName}
+                        </Text>
+                    )}
                 </View>
             </View>
         </Pressable>
