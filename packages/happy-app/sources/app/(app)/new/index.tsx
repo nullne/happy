@@ -532,6 +532,7 @@ function NewSessionScreen() {
     const [modelIndex, setModelIndex] = React.useState(0);
     const [effortIndex, setEffortIndex] = React.useState(0);
     const [isSpawning, setIsSpawning] = React.useState(false);
+    const [spawnStatus, setSpawnStatus] = React.useState<string | null>(null);
     const [activePicker, setActivePicker] = React.useState<PickerType | null>(null);
 
     // Config collapse — auto-collapses when typing, expands when empty
@@ -839,6 +840,7 @@ function NewSessionScreen() {
         }
 
         setIsSpawning(true);
+        setSpawnStatus(null);
         try {
             let spawnDirectory: string;
             let gitBranch = '';
@@ -852,6 +854,7 @@ function NewSessionScreen() {
                 }
                 const sessionSlug = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
                 if (selectedProject.githubUrl) {
+                    setSpawnStatus('Preparing repo...');
                     const gitResult = await setupProjectSession(
                         selectedMachineId, workspaceRoot, selectedProject, sessionSlug
                     );
@@ -861,9 +864,11 @@ function NewSessionScreen() {
                     }
                     spawnDirectory = gitResult.directory;
                     gitBranch = gitResult.branch;
+                    setSpawnStatus('Starting agent...');
                 } else {
                     const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60);
                     spawnDirectory = `${workspaceRoot}/${slugify(selectedProject.name)}/${sessionSlug}`;
+                    setSpawnStatus('Starting agent...');
                 }
                 approvedNewDirectoryCreation = true;
             } else {
@@ -920,6 +925,7 @@ function NewSessionScreen() {
 
                     // Send initial message if provided
                     if (prompt.trim()) {
+                        setSpawnStatus('Sending message...');
                         await sync.sendMessage(result.sessionId, prompt.trim());
                     }
 
@@ -948,6 +954,7 @@ function NewSessionScreen() {
             Modal.alert(t('common.error'), errorMessage);
         } finally {
             setIsSpawning(false);
+            setSpawnStatus(null);
         }
     }, [selectedMachineId, selectedMachine, selectedPath, selectedAgent, prompt, router, navigateToSession, currentPermission.key, currentModelKey, worktreeKey, selectedProject, currentHostInfo]);
 
@@ -1257,6 +1264,13 @@ function NewSessionScreen() {
                 <View style={{ flex: 1 }} />
 
                 <View style={{ maxWidth: layout.maxWidth, width: '100%', alignSelf: 'center', paddingHorizontal: 12, gap: 8 }}>
+                    {/* Spawn status */}
+                    {isSpawning && spawnStatus && (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 4 }}>
+                            <ActivityIndicator size="small" color={theme.colors.textSecondary} />
+                            <Text style={{ fontSize: 13, color: theme.colors.textSecondary }}>{spawnStatus}</Text>
+                        </View>
+                    )}
                     {/* Input box */}
                     <View style={styles.inputBox}>
                         <View style={styles.inputField}>

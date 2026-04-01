@@ -335,7 +335,10 @@ export const storage = create<StorageState>()((set, get) => {
                     ...session,
                     presence,
                     draft: existingDraft || savedDraft || session.draft || null,
-                    permissionMode: resolvedPermissionMode
+                    permissionMode: resolvedPermissionMode,
+                    projectId: state.sessions[session.id]?.projectId ?? session.projectId ?? null,
+                    gitBranch: state.sessions[session.id]?.gitBranch ?? session.gitBranch ?? null,
+                    githubUrl: state.sessions[session.id]?.githubUrl ?? session.githubUrl ?? null,
                 };
             });
 
